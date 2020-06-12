@@ -2,7 +2,7 @@
 
 ## Introduction
 
-When listening for a reverse shell (eg. under `multi/handler`) from an unknown IP on a popular port (22, 80, 443, 8080, ...), it's very likely to receive tons of unexpected connections triggered by annoying scripted attacks and scans from the Internet. To save some time and efforts inspecting those trash sessions, the plugin can automatically validate the sessions upon their creation, with the following rules:
+When listening for a reverse shell (eg. under `multi/handler`) from a random IP on a popular port (22, 80, 443, 8080, ...), it's very likely to receive tons of unwanted connections triggered by annoying scripted attacks and scans from the Internet. To save some time and efforts inspecting and closing those trash sessions, the plugin can automatically validate the sessions upon their creation, with the following rules:
 
 - Echo challenge
 
@@ -45,8 +45,14 @@ When listening for a reverse shell (eg. under `multi/handler`) from an unknown I
 
 ## Important Notice
 
-- The "echo challenge" should under no circumstances be used as a means of authentication. It is effortless for an adversary to bypass the challenge and fake a "legitimate reverse shell". However, this plugin shouldn't add any new attack surface to your server either.
+- The "echo challenge" should under no circumstances be used as a means of authentication. It is effortless for an adversary to bypass the challenge and fake a "legitimate reverse shell". However, it shouldn't add any new attack surface to your server either.
 
 - The plugin executes `echo` command on the session, which to some extent makes more noise inside the target environment in the beginning. So as the "auto exit" feature.
 
 - The plugin **might** kill an expected session, when it fails the challenge due to timeout (or other unknown reasons). Use at your own risk!
+
+- The "simple HTTP APIs" feature **will** open a port on the localhost and listen for requests to control the features for the plugin. Disable it if you consider it risky. Improvement to this feature may be posted in the future.
+
+## Miscs
+
+Fail2ban regex: `failregex = core: <HOST> failed echo challenge and got killed\.$`
