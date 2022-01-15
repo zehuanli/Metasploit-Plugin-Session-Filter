@@ -3,8 +3,6 @@
 # $Revision$
 #
 
-# fail2ban: failregex = core: <HOST> failed echo challenge and got killed\.$
-
 module Msf
 
 ###
@@ -15,9 +13,6 @@ module Msf
 
 class Plugin::EventSessionFilter < Msf::Plugin
 
-  SF_IP_WHITELIST = []
-  SF_BLACKLIST = ['get', 'post', 'connect', 'cookie', 'host', 'mozilla']
-  SF_TIMEOUT = 10
   $notify = false
   $auto_exit = false
   @@valid_session_time = []
@@ -67,63 +62,26 @@ class Plugin::EventSessionFilter < Msf::Plugin
     end
   end
 
-  def on_session_open(session)
+  def on_session_initialized(session)
     # on open
     session.singleton_class.send(:attr_accessor, 'interacted')
     session.interacted = false
     begin
-      whitelisted = SF_IP_WHITELIST.include?(session.session_host)
-      resps = []
-      to_kill = true
-      if ! whitelisted
-        challenge = [*('A'..'Z'), *('a'..'z'), *('0'..'9')].sample(30).join
-        while SF_BLACKLIST.any? {|sub| challenge.downcase.include? sub}
-          challenge = [*('A'..'Z'), *('a'..'z'), *('0'..'9')].sample(30).join
-        end
-        session.shell_write('echo ' + challenge + "\n")
-        resp = session.shell_read(-1, SF_TIMEOUT)
-        while resp != nil
-          resps.push(resp)
-          if resp.include? challenge
-            to_kill = false
-            break
-          end
-          if resps.length >= 5 || SF_BLACKLIST.any? {|sub| resp.downcase.include? sub}
-            break
-          end
-          resp = session.shell_read(-1, SF_TIMEOUT)
-        end
+      if session.interacted
+        print_status('Session ' + session.sid.to_s + ' interacted. All previous messages:')
       else
-        to_kill = false
-#        resp = session.shell_read(-1, SF_TIMEOUT)
-#        while resp != nil
-#          resps.push(resp)
-#          resp = session.shell_read(-1, SF_TIMEOUT)
-#        end
-      end
-      if ! whitelisted && to_kill && ! session.interacted 
-        print_error('Session ' + session.sid.to_s + ' failed echo challenge and got killed.' )
-        ilog(session.session_host + ' failed echo challenge and got killed.')
-        session.kill
-      else
-        if session.interacted
-          print_status('Session ' + session.sid.to_s + ' interacted. All previous messages:')
-        else
-          @@valid_session_time << Time.new.in_time_zone('Pacific Time (US & Canada)').to_s
-          while @@valid_session_time.length > 5
-            @@valid_session_time = @@valid_session_time.drop(1)
-          end
-          if $notify
-            # Send message through your own notification channel here
-          end
-          if $auto_exit
-            session.shell_write("exit\n")
-            session.kill
-            print_warning('Session ' + session.sid.to_s + ' auto exited.')
-          end
-          print_good('Session ' + session.sid.to_s + ' passed echo challenge. All previous messages:')
+        @@valid_session_time << Time.new.in_time_zone('Pacific Time (US & Canada)').to_s
+        while @@valid_session_time.length > 5
+          @@valid_session_time = @@valid_session_time.drop(1)
         end
-        resps.each{|item| print_status(item + '<<<')}
+        if $notify
+          # Send message through your own notification channel here
+        end
+        if $auto_exit
+          session.shell_write("exit\n")
+          session.kill
+          print_warning('Session ' + session.sid.to_s + ' auto exited.')
+        end
       end
     rescue => e
       print_error(e.message)
