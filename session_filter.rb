@@ -15,10 +15,12 @@ module Msf
 
 class Plugin::EventSessionFilter < Msf::Plugin
 
-  SF_BLACKLIST ||= ['get', 'post', 'connect', 'http', 'cookie', 'host', 'mozilla']
-  SF_TIMEOUT ||= 10
+  SF_IP_WHITELIST = []
+  SF_BLACKLIST = ['get', 'post', 'connect', 'cookie', 'host', 'mozilla']
+  SF_TIMEOUT = 10
   $notify = false
   $auto_exit = false
+  @@valid_session_time = []
 
   class SF_ConsoleCommandDispatcher
     include Msf::Ui::Console::CommandDispatcher
@@ -70,26 +72,36 @@ class Plugin::EventSessionFilter < Msf::Plugin
     session.singleton_class.send(:attr_accessor, 'interacted')
     session.interacted = false
     begin
-      challenge = [*('A'..'Z'), *('a'..'z'), *('0'..'9')].sample(30).join
-      while SF_BLACKLIST.any? {|sub| challenge.downcase.include? sub}
-        challenge = [*('A'..'Z'), *('a'..'z'), *('0'..'9')].sample(30).join
-      end
-      session.shell_write('echo ' + challenge + "\n")
-      to_kill = true
-      resp = session.shell_read(-1, SF_TIMEOUT)
+      whitelisted = SF_IP_WHITELIST.include?(session.session_host)
       resps = []
-      while resp != nil
-        resps.push(resp)
-        if resp.include? challenge
-          to_kill = false
-          break
+      to_kill = true
+      if ! whitelisted
+        challenge = [*('A'..'Z'), *('a'..'z'), *('0'..'9')].sample(30).join
+        while SF_BLACKLIST.any? {|sub| challenge.downcase.include? sub}
+          challenge = [*('A'..'Z'), *('a'..'z'), *('0'..'9')].sample(30).join
         end
-        if resps.length >= 5 || SF_BLACKLIST.any? {|sub| resp.downcase.include? sub}
-          break
-        end
+        session.shell_write('echo ' + challenge + "\n")
         resp = session.shell_read(-1, SF_TIMEOUT)
+        while resp != nil
+          resps.push(resp)
+          if resp.include? challenge
+            to_kill = false
+            break
+          end
+          if resps.length >= 5 || SF_BLACKLIST.any? {|sub| resp.downcase.include? sub}
+            break
+          end
+          resp = session.shell_read(-1, SF_TIMEOUT)
+        end
+      else
+        to_kill = false
+#        resp = session.shell_read(-1, SF_TIMEOUT)
+#        while resp != nil
+#          resps.push(resp)
+#          resp = session.shell_read(-1, SF_TIMEOUT)
+#        end
       end
-      if to_kill && ! session.interacted
+      if ! whitelisted && to_kill && ! session.interacted 
         print_error('Session ' + session.sid.to_s + ' failed echo challenge and got killed.' )
         ilog(session.session_host + ' failed echo challenge and got killed.')
         session.kill
@@ -97,15 +109,19 @@ class Plugin::EventSessionFilter < Msf::Plugin
         if session.interacted
           print_status('Session ' + session.sid.to_s + ' interacted. All previous messages:')
         else
+          @@valid_session_time << Time.new.in_time_zone('Pacific Time (US & Canada)').to_s
+          while @@valid_session_time.length > 5
+            @@valid_session_time = @@valid_session_time.drop(1)
+          end
           if $notify
             # Send message through your own notification channel here
           end
-          print_good('Session ' + session.sid.to_s + ' passed echo challenge. All previous messages:')
           if $auto_exit
             session.shell_write("exit\n")
             session.kill
             print_warning('Session ' + session.sid.to_s + ' auto exited.')
           end
+          print_good('Session ' + session.sid.to_s + ' passed echo challenge. All previous messages:')
         end
         resps.each{|item| print_status(item + '<<<')}
       end
@@ -116,7 +132,9 @@ class Plugin::EventSessionFilter < Msf::Plugin
   end
 
   def on_session_interact(session)
-    session.interacted = true
+    if session.respond_to? :interacted
+      session.interacted = true
+    end
   end
 
   def on_session_output(session, output)
@@ -136,6 +154,7 @@ class Plugin::EventSessionFilter < Msf::Plugin
     $notify = self.opts['notify'] && self.opts['notify'].downcase.to_s == 'true'
     $auto_exit = self.opts['auto_exit'] && self.opts['auto_exit'].downcase.to_s == 'true'
     self.framework.events.add_session_subscriber(self)
+    @@framework = self.framework
     add_console_dispatcher(SF_ConsoleCommandDispatcher)
     start_server
   end
@@ -153,7 +172,7 @@ class Plugin::EventSessionFilter < Msf::Plugin
   def start_server
     require 'socket'
     @@server_thread = Thread.start do
-      @@server = TCPServer.new('localhost', 8000)
+      @@server = TCPServer.new('127.0.0.1', 8000)
       print_line('SessionFilter TCP server started')
       loop do
         @@socket_thread = Thread.start(@@server.accept) do |socket|
@@ -165,6 +184,15 @@ class Plugin::EventSessionFilter < Msf::Plugin
           elsif path == '/exit'
             $auto_exit = ! $auto_exit
             response = $auto_exit ? 'Auto exit: true' : 'Auto exit: false'
+          elsif path == '/clear'
+            @@valid_session_time.clear
+            response = 'ok'
+          elsif path == '/status'
+            response = ($notify ? 'Notify: true' : 'Notify: false') + "\n" +
+                       ($auto_exit ? 'Auto exit: true' : 'Auto exit: false') + "\n" +
+                       @@framework.jobs.length.to_s + "\n" +
+                       @@framework.sessions.length.to_s + "\n" +
+                       @@valid_session_time.to_s
           else
             response = 'ok'
           end
@@ -196,3 +224,4 @@ class Plugin::EventSessionFilter < Msf::Plugin
 
 end
 end
+
